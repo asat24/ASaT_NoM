@@ -1,0 +1,31 @@
+shared:
+    image: golang:1.17
+    environment:
+        GO111MODULE: on
+
+jobs:
+    main:
+        environment:
+            SD_SONAR_OPTS:  "-Dsonar.sources=./ -Dsonar.exclusions=**/*_test.go,**/vendor/** -Dsonar.tests=./ -Dsonar.test.inclusions=**/*_test.go -Dsonar.test.exclusions=**/vendor/** -Dsonar.go.coverage.reportPaths=${SD_ARTIFACTS_DIR}/coverage.out -Dsonar.go.tests.reportPaths=${SD_ARTIFACTS_DIR}/report.json"
+        requires: [~commit, ~pr]
+        steps:
+            - vet: go vet ./...
+            - gofmt: ret=$(find . -name '*.go' | xargs gofmt -d) && echo "$ret" && test -z "$ret"
+            - test-setup: go get gotest.tools/gotestsum@latest
+            - test: gotestsum --format testname --jsonfile ${SD_ARTIFACTS_DIR}/report.json -- -coverprofile=${SD_ARTIFACTS_DIR}/coverage.out ./...
+            - build: go build -a -o store-cli
+            - test-release: "curl -sL https://git.io/goreleaser | bash -s -- --snapshot"
+
+    deploy:
+        requires: main
+        steps:
+            - setup-ci: git clone https://github.com/screwdriver-cd/toolbox.git ci
+            - gofmt: ret=$(find . -name '*.go' | xargs gofmt -d) && echo "$ret" && test -z "$ret"
+            - tag: ./ci/git-tag.sh
+            - release: |
+                curl -sL https://git.io/goreleaser | bash
+        secrets:
+            # Pushing tags to Git
+            - GIT_KEY_BASE64
+            # Pushing releases to GitHub
+            - GITHUB_TOKEN
